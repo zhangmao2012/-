@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>聊天室</title>
+    <style>
+        body{
+            margin: 0;
+            padding: 0 100px;
+        }
+        #chat-box{
+            width: 800px;
+            height: 450px;
+            border: 1px solid black;
+            padding: 20px;
+            overflow-y: scroll;
+        }
+        #welcome{
+            font-size: 30px;
+            text-align: center;
+            color: gold;
+        }
+        .nickname{
+            color: purple;
+            cursor: pointer;
+        }
+        .in-out{
+            color: lightgray;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <h1 id="welcome">欢迎来到202006聊天室，目前在线人数：0人</h1>
+        <input id="nickname" type="text" placeholder="请输入昵称（必填）">
+        <button id="in">进入聊天室</button>
+        <button id="out">退出聊天室</button>
+    </div>
+    
+    
+    <div id="chat-box">
+        <div id="content"></div>
+    </div>
+
+    <div>
+        <button id="to-all">所有人</button>
+        <span>消息发送给：</span><span id="target">所有人</span>
+    </div>
+
+    <div>
+        <textarea name="msg" id="msg" cols="30" rows="3"></textarea>
+        <button id="send">发送</button>
+    </div>
+</body>
+<script src="./jquery-3.5.1.js"></script>
+<script>
+
+    let ws = null
+    let target = null
+    let nickname = null
+
+    $("#in").click(function(){
+        if (ws) {
+            alert("你已经在聊天室中了，请勿重复进入")
+            return
+        }
+
+        nickname = $("#nickname").val().trim()
+        if (!nickname) {
+            alert("请先输入昵称")
+            return
+        }
+
+        // 在客户端程序创建一个 websocket 链接到服务器上
+        ws = new WebSocket("ws://192.168.124.14:3000/" + nickname)
+        // 监听链接成功后的回调函数
+        ws.onopen = function () {
+            console.log("链接成功");
+            $("#in").prop("disabled",true)
+        }
+        // 监听收到服务器发来消息的回调函数
+        ws.onmessage = function(res){
+            console.log(res.data);
+            let dataObj = JSON.parse(res.data)
+            switch (dataObj.type) {
+                case "in-out":
+                    {
+                        let $name = $("<span class='nickname'></span>").text(dataObj.nickname)
+                        let $content =  $("<span></span>").text(dataObj.content)
+                        let $p = $("<p class='in-out'></p>").append($name).append($content)
+                        $("#content").append($p)
+                    }
+                    break;
+                case "welcome":
+                    $("#welcome").text(dataObj.content)
+                    break;
+                case "group":
+                    {
+                        let $name = $("<span class='nickname'></span>").text(dataObj.nickname)
+                        let $content = $("<span></span>").text("：" + dataObj.content)
+                        let $p = $("<p></p>").attr("title", dataObj.ip).append($name).append($content)
+                        if (dataObj.vip && nickname!= dataObj.nickname) {
+                            let $btn = $("<button class='tichu'>踢出</button>").data("nickname", dataObj.nickname)
+                            $p.append($btn)
+                        }
+                        $("#content").append($p)
+                    }
+                    break;
+                case "private":
+                    {
+                        let $name = $("<span class='nickname'></span>").text(dataObj.nickname)
+                        let $content = $("<span></span>").text("悄悄对我说：" + dataObj.content)
+                        let $p = $("<p></p>").attr("title", dataObj.ip).append($name).append($content)
+                        $("#content").append($p)
+                    }
+                    break;
+                case "private-success":
+                    {
+                        let $span = $("<span>我悄悄对</span>")
+                        let $name = $("<span class='nickname'></span>").text(dataObj.nickname)
+                        let $content = $("<span></span>").text("说：" + dataObj.content)
+                        let $p = $("<p></p>").attr("title", dataObj.ip).append($span).append($name).append($content)
+                        $("#content").append($p)
+                    }
+                    break;
+                default:
+                    break;
+            }
+
+            // 处理自动滚动
+            // console.log($("#chat-box")[0].clientHeight);
+            // console.log($("#chat-box")[0].scrollHeight);
+            // console.log($("#chat-box")[0].scrollTop);
+            let chatBox = $("#chat-box")[0]
+            if(chatBox.scrollTop + chatBox.clientHeight <= chatBox.scrollHeight){
+                chatBox.scrollTop = chatBox.scrollHeight - chatBox.clientHeight
+            }
+        }
+    })
+
+    // 切换聊天对象
+    $("#content").on("click", ".nickname",function(e){
+        if (nickname != $(e.currentTarget).text()) {
+            target = $(e.currentTarget).text()
+            $("#target").text(target)
+        }
+    })
+    $("#to-all").click(function (e) {
+        target = null
+        $("#target").text("所有人")
+    })
+
+    // 发送聊天消息
+    window.onkeydown = function(e){
+        if (e.keyCode === 13) {
+            sendMessage()
+        }
+    }
+    $("#send").click(sendMessage)
+    function sendMessage() {
+        if (!ws) {
+            alert("你已经断开链接，请重新加入")
+            return
+        }
+
+        let msg = $("#msg").val().trim();
+        if (!msg) {
+            alert("聊天内容不能为空")
+            return
+        }
+
+        if (target) {
+            // 私聊
+            ws.send(JSON.stringify({
+                type: "private",
+                data: msg,
+                target: target
+            }))
+        } else {
+            // 群聊
+            ws.send(JSON.stringify({
+                type: "group",
+                data: msg
+            }))
+        }
+        $("#msg").val("")
+    }
+
+    // 退出群聊
+    $("#out").click(function(){
+        if (!ws) {
+            alert("你已经断开链接，请重新加入")
+            return
+        }
+        ws.close()
+        ws = null
+    })
+
+    // 踢出群聊
+    $("#content").on("click",".tichu",function(){
+        if (!ws) {
+            alert("你已经断开链接，请重新加入")
+            return
+        }
+        ws.send(JSON.stringify({
+            type: "tichu",
+            nickname: $(this).data("nickname")
+        }))
+    })
+</script>
+</html>
